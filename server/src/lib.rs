@@ -598,7 +598,7 @@ async fn run_inner(
     // Keep the sender alive: dropping it would resolve `shutdown_rx.recv()` and
     // shut the server down at once.
     #[cfg(not(feature = "tui"))]
-    let _shutdown_tx = shutdown_tx;
+    let _shutdown_tx: tokio::sync::mpsc::Sender<()> = shutdown_tx;
 
     let app = build_router(state);
 
