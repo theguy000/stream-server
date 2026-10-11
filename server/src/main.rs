@@ -3,11 +3,14 @@
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 mod app {
     use fslock::LockFile;
+    #[cfg(feature = "tray")]
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+    #[cfg(feature = "tray")]
     use tao::event::Event;
+    #[cfg(feature = "tray")]
     use tao::event_loop::{ControlFlow, EventLoopBuilder};
 
     #[global_allocator]
@@ -39,17 +42,24 @@ mod app {
         }
 
         let args: Vec<String> = std::env::args().collect();
-        let no_tray = args.iter().any(|a| a == "--no-tray");
-        let use_tui = args.iter().any(|a| a == "--tui");
-        let is_release = !cfg!(debug_assertions);
-        let silent_mode =
-            !no_tray && (args.iter().any(|a| a == "--silent") || !attached_console || is_release);
+        let use_tui = cfg!(feature = "tui") && args.iter().any(|a| a == "--tui");
 
-        let result = if silent_mode {
-            run_tray_mode(use_tui)
-        } else {
-            run_headless_mode(use_tui)
+        // Without the `tray` feature there is no tray mode, so `--no-tray` and
+        // `--silent` have nothing to switch and the server always runs headless.
+        #[cfg(feature = "tray")]
+        let result = {
+            let no_tray = args.iter().any(|a| a == "--no-tray");
+            let is_release = !cfg!(debug_assertions);
+            let silent_mode = !no_tray
+                && (args.iter().any(|a| a == "--silent") || !attached_console || is_release);
+            if silent_mode {
+                run_tray_mode(use_tui)
+            } else {
+                run_headless_mode(use_tui)
+            }
         };
+        #[cfg(not(feature = "tray"))]
+        let result = run_headless_mode(use_tui);
 
         if let Err(err) = result {
             if is_missing_ffmpeg_error(&err) {
@@ -61,6 +71,7 @@ mod app {
         Ok(())
     }
 
+    #[cfg(feature = "tray")]
     fn run_tray_mode(use_tui: bool) -> anyhow::Result<()> {
         let event_loop =
             EventLoopBuilder::<stream_server::tray::UserEvent>::with_user_event().build();

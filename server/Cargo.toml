@@ -49,8 +49,8 @@ mimalloc = { version = "0.1.48", default-features = false }
 rayon = "1.11.0"
 sha2 = "0.11.0"
 semver = "1.0"
-ratatui = "0.30.0"
-crossterm = "0.29.0"
+ratatui = { version = "0.30.0", optional = true }
+crossterm = { version = "0.29.0", optional = true }
 crossbeam-channel = "0.5.13"
 notify = { version = "8.2.0", default-features = false, features = [
     "macos_kqueue",
@@ -71,7 +71,7 @@ axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 ssdp-client = "2.1.0"
 fslock = "0.2.1"
 open = "5.3.3"
-image = "0.25.9"
+image = { version = "0.25.9", optional = true }
 ico = "0.5.0"
 zip = "8.6.0"
 async-sevenz = { path = "../bindings/async-sevenz" }
@@ -79,14 +79,14 @@ chrono = "0.4.42"
 sysinfo = "0.39.5"
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
-tao = "0.35.3"
-settings-gui = { path = "../settings-gui" }
+tao = { version = "0.35.3", optional = true }
+settings-gui = { path = "../settings-gui", optional = true }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-tray-icon = { version = "0.24.1", default-features = false }
+tray-icon = { version = "0.24.1", default-features = false, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"] }
+tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 rustls-platform-verifier = "0.7.0"
@@ -106,9 +106,14 @@ windows = { version = "0.62.2", features = [
 
 
 [features]
-default = ["libtorrent"]
+default = ["libtorrent", "tray", "tui"]
 libtorrent = ["enginefs/libtorrent"]
 librqbit = ["enginefs/librqbit", "dep:librqbit"]
+# System tray and its settings window. Needs a display and, on Linux, GTK and
+# an appindicator library at start-up. Leave it out for a headless sidecar.
+tray = ["dep:tao", "dep:tray-icon", "dep:settings-gui", "dep:image"]
+# Terminal UI behind the --tui flag.
+tui = ["dep:ratatui", "dep:crossterm"]
 
 [package.metadata.deb]
 maintainer = "stream-server maintainers"
