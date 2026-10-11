@@ -104,7 +104,6 @@ pub async fn proxy_handler(
     // Forward standard headers
     let allowed_req_headers = [
         "accept",
-        "accept-encoding",
         "accept-language",
         "connection",
         "transfer-encoding",
@@ -118,6 +117,11 @@ pub async fn proxy_handler(
             req_builder = req_builder.header(name, value);
         }
     }
+
+    // The response allow-list below drops `content-encoding`, so a compressed
+    // body would reach the client as raw gzip it cannot decode. Ask for the
+    // identity encoding instead of forwarding the client's `accept-encoding`.
+    req_builder = req_builder.header("accept-encoding", "identity");
 
     // Apply custom headers from query params (Core format)
     for (name, value) in custom_headers {
@@ -237,4 +241,74 @@ fn rewrite_playlist(body: &str, base_url: &Url) -> String {
         }
     }
     rewritten
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::routing::get;
+    use flate2::{Compression, write::GzEncoder};
+    use std::io::Write;
+    use tokio::net::TcpListener;
+
+    const PAGE: &str = "<!doctype html><html>hello</html>";
+
+    async fn upstream_page(headers: HeaderMap) -> Response {
+        let gzip = headers
+            .get(header::ACCEPT_ENCODING)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("gzip"));
+        if !gzip {
+            return ([(header::CONTENT_TYPE, "text/html")], PAGE).into_response();
+        }
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(PAGE.as_bytes()).unwrap();
+        (
+            [
+                (header::CONTENT_TYPE, "text/html"),
+                (header::CONTENT_ENCODING, "gzip"),
+            ],
+            encoder.finish().unwrap(),
+        )
+            .into_response()
+    }
+
+    async fn serve(app: Router) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        port
+    }
+
+    /// A client that accepts gzip must get a body it can read: either plain, or
+    /// compressed with a matching `Content-Encoding` header.
+    #[tokio::test]
+    async fn body_is_readable_when_the_client_accepts_gzip() {
+        let upstream = serve(Router::new().route("/page.html", get(upstream_page))).await;
+        let proxy = serve(Router::new().nest(
+            "/proxy",
+            Router::new().route("/{*rest}", any(proxy_handler)),
+        ))
+        .await;
+        let url = format!(
+            "http://127.0.0.1:{proxy}/proxy/d=http%3A%2F%2F127.0.0.1%3A{upstream}/page.html"
+        );
+
+        let response = reqwest::Client::new()
+            .get(url)
+            .header("accept-encoding", "gzip, deflate, br")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let encoding = response.headers().get(header::CONTENT_ENCODING).cloned();
+        let body = response.bytes().await.unwrap();
+
+        assert!(
+            encoding.is_some() || body.as_ref() == PAGE.as_bytes(),
+            "compressed body without a Content-Encoding header ({} bytes, starts {:02x?})",
+            body.len(),
+            &body[..body.len().min(2)]
+        );
+    }
 }
