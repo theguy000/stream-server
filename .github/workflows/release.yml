@@ -300,6 +300,20 @@ jobs:
           path: "*.AppImage"
           if-no-files-found: ignore
 
+      # Built last: it overwrites target/release/server, which the steps above read.
+      # No tray, TUI or settings window, so it needs no display or GTK at start-up.
+      - name: Build headless server
+        run: |
+          cargo build --release --features libtorrent --no-default-features
+          mkdir -p headless
+          cp target/release/server headless/server
+
+      - name: Upload headless binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-linux-headless
+          path: headless/server
+
   build-arch:
     name: Build Arch Linux
     runs-on: ubuntu-latest
@@ -419,6 +433,7 @@ jobs:
           # Linux
           copy_file artifacts/server-linux-amd64/server stream-server-linux-amd64
           copy_file artifacts/server-linux-amd64/settings-gui stream-server-settings-linux-amd64
+          copy_file artifacts/server-linux-headless/server stream-server-linux-amd64-headless
           copy_latest artifacts/server-linux-deb "*.deb" stream-server-linux-amd64.deb
           copy_latest artifacts/server-linux-appimage "*.AppImage" stream-server-linux-amd64.AppImage
           # Arch
