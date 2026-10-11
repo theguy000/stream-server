@@ -20,10 +20,16 @@ pub const DEFAULT_HTTPS_PORT: u16 = 12470;
 pub static GLOBAL_STATE: once_cell::sync::Lazy<std::sync::RwLock<Option<AppState>>> =
     once_cell::sync::Lazy::new(|| std::sync::RwLock::new(None));
 
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+#[cfg(all(
+    feature = "tray",
+    any(target_os = "windows", target_os = "macos", target_os = "linux")
+))]
 pub mod tray;
 
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+#[cfg(not(all(
+    feature = "tray",
+    any(target_os = "windows", target_os = "macos", target_os = "linux")
+)))]
 pub mod tray {
     #[derive(Default)]
     pub struct TrayStats;
@@ -51,6 +57,7 @@ mod local_addon;
 mod routes;
 mod ssdp;
 mod state;
+#[cfg(feature = "tui")]
 mod tui;
 mod updater;
 pub mod ytdlp;
@@ -243,12 +250,15 @@ async fn run_inner(
         .clone()
         .unwrap_or_else(|| format!("http://{}", public_http_addr));
 
+    #[cfg(feature = "tui")]
     let (tui_log_layer, tui_rx) = if cfg.use_tui {
         let (tx, rx) = crossbeam_channel::bounded(1000);
         (Some(tui::log_layer::TuiLogLayer::new(tx)), Some(rx))
     } else {
         (None, None)
     };
+    #[cfg(not(feature = "tui"))]
+    let tui_log_layer: Option<tracing_subscriber::layer::Identity> = None;
 
     let config_dir = match cfg.config_dir.clone() {
         Some(path) => path,
@@ -579,11 +589,16 @@ async fn run_inner(
     }
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel(1);
+    #[cfg(feature = "tui")]
     if cfg.use_tui
         && let Some(rx) = tui_rx
     {
         tui::start_tui(Arc::new(state.clone()), rx, shutdown_tx);
     }
+    // Keep the sender alive: dropping it would resolve `shutdown_rx.recv()` and
+    // shut the server down at once.
+    #[cfg(not(feature = "tui"))]
+    let _shutdown_tx: tokio::sync::mpsc::Sender<()> = shutdown_tx;
 
     let app = build_router(state);
 
